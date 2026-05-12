@@ -1,3 +1,4 @@
+import streamlit as st
 from dotenv import load_dotenv
 load_dotenv()
 import anthropic
@@ -5,8 +6,8 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+client = anthropic.Anthropic(api_key=api_key)
 
 SYSTEM_PROMPT = """You are a GIS analyst assistant specializing in Hillsborough County, Florida.
 You have access to census tract data including demographics, flood risk scores, home values, 
