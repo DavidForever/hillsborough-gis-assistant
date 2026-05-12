@@ -1,11 +1,10 @@
-import streamlit as st
-from dotenv import load_dotenv
-load_dotenv()
 import anthropic
 import os
+import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
 api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
 client = anthropic.Anthropic(api_key=api_key)
 
