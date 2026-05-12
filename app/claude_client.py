@@ -1,11 +1,19 @@
 import anthropic
 import os
-import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+# Try environment variable first, then Streamlit secrets
+api_key = os.getenv("ANTHROPIC_API_KEY")
+
+if not api_key:
+    try:
+        import streamlit as st
+        api_key = st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+
 client = anthropic.Anthropic(api_key=api_key)
 
 SYSTEM_PROMPT = """You are a GIS analyst assistant specializing in Hillsborough County, Florida.
