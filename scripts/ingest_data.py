@@ -1,74 +1,58 @@
-"""
-Run this ONCE to embed your GeoJSON data into ChromaDB.
-Usage: python scripts/ingest_data.py
-"""
 import json
 import sys
 import os
+import pickle
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import chromadb
-from chromadb.utils import embedding_functions
-import geopandas as gpd
+from sentence_transformers import SentenceTransformer
+import faiss
 
 
-def create_tract_document(feature: dict, properties: dict) -> tuple[str, dict]:
-    """Convert a GeoJSON feature into a text document + metadata for ChromaDB."""
-
-    # Build a rich text description of the tract for semantic search
+def create_tract_document(properties: dict) -> str:
     parts = []
 
-    if "GEOID" in properties or "geoid" in properties:
-        geoid = properties.get("GEOID") or properties.get("geoid", "unknown")
+    geoid = properties.get("GEOID") or properties.get("geoid")
+    if geoid:
         parts.append(f"Census tract {geoid} in Hillsborough County, Florida.")
 
-    # Income
     income_keys = ["median_income", "med_income", "B19013_001E"]
     for k in income_keys:
         if k in properties and properties[k]:
-            parts.append(f"Median household income: ${properties[k]:,.0f}.")
+            parts.append(f"Median household income: ${float(properties[k]):,.0f}.")
             break
 
-    # Poverty
     poverty_keys = ["poverty_rate", "poverty_pct", "pov_rate"]
     for k in poverty_keys:
         if k in properties and properties[k]:
-            parts.append(f"Poverty rate: {properties[k]:.1f}%.")
+            parts.append(f"Poverty rate: {float(properties[k]):.1f}%.")
             break
 
-    # Flood risk
     flood_keys = ["flood_risk", "flood_risk_score", "flood"]
     for k in flood_keys:
         if k in properties and properties[k]:
-            score = properties[k]
+            score = float(properties[k])
             level = "high" if score > 0.6 else "moderate" if score > 0.3 else "low"
             parts.append(f"Flood risk: {level} ({score:.2f}).")
             break
 
-    # Home values
     home_keys = ["median_home_value", "home_value", "med_home_val"]
     for k in home_keys:
         if k in properties and properties[k]:
-            parts.append(f"Median home value: ${properties[k]:,.0f}.")
+            parts.append(f"Median home value: ${float(properties[k]):,.0f}.")
             break
 
-    # Hospital distance
     hosp_keys = ["hospital_dist", "dist_to_hospital", "hosp_dist_miles"]
     for k in hosp_keys:
         if k in properties and properties[k]:
-            parts.append(f"Distance to nearest hospital: {properties[k]:.1f} miles.")
+            parts.append(f"Distance to nearest hospital: {float(properties[k]):.1f} miles.")
             break
 
-    doc_text = " ".join(parts) if parts else str(properties)
-
-    # Metadata (for filtering in ChromaDB)
-    metadata = {k: str(v) for k, v in properties.items() if k != "geometry" and v is not None}
-
-    return doc_text, metadata
+    return " ".join(parts) if parts else str(properties)
 
 
-def ingest_geojson(geojson_path: str, collection_name: str = "hillsborough_tracts"):
+def ingest_geojson(geojson_path: str):
     print(f"Loading {geojson_path}...")
 
     with open(geojson_path) as f:
@@ -77,50 +61,31 @@ def ingest_geojson(geojson_path: str, collection_name: str = "hillsborough_tract
     features = data.get("features", [])
     print(f"Found {len(features)} features.")
 
-    # Set up ChromaDB with default embedding function (all-MiniLM-L6-v2)
-    client = chromadb.PersistentClient(path="./vectorstore")
-
-    ef = embedding_functions.DefaultEmbeddingFunction()
-
-    # Delete existing collection if it exists
-    try:
-        client.delete_collection(collection_name)
-        print(f"Deleted existing collection '{collection_name}'")
-    except Exception:
-        pass
-
-    collection = client.create_collection(
-        name=collection_name,
-        embedding_function=ef,
-        metadata={"hnsw:space": "cosine"}
-    )
-
-    documents, metadatas, ids = [], [], []
-
-    for i, feature in enumerate(features):
+    documents = []
+    for feature in features:
         props = feature.get("properties", {})
-        doc_text, metadata = create_tract_document(feature, props)
+        doc = create_tract_document(props)
+        documents.append(doc)
 
-        doc_id = props.get("GEOID") or props.get("geoid") or f"tract_{i}"
+    print("Loading embedding model...")
+    model = SentenceTransformer("all-MiniLM-L6-v2")
 
-        documents.append(doc_text)
-        metadatas.append(metadata)
-        ids.append(str(doc_id))
+    print("Embedding documents...")
+    embeddings = model.encode(documents, show_progress_bar=True).astype("float32")
+    faiss.normalize_L2(embeddings)
 
-    # Batch upsert
-    batch_size = 50
-    for i in range(0, len(documents), batch_size):
-        collection.upsert(
-            documents=documents[i:i + batch_size],
-            metadatas=metadatas[i:i + batch_size],
-            ids=ids[i:i + batch_size]
-        )
-        print(f"  Embedded {min(i + batch_size, len(documents))}/{len(documents)} tracts...")
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatIP(dimension)
+    index.add(embeddings)
 
-    print(f"\nDone! {len(documents)} tracts embedded into ChromaDB collection '{collection_name}'.")
-    print("Vectorstore saved to ./vectorstore/")
+    os.makedirs("vectorstore", exist_ok=True)
+    with open("vectorstore/faiss_index.pkl", "wb") as f:
+        pickle.dump({"index": index, "documents": documents}, f)
+
+    print(f"\nDone! {len(documents)} tracts embedded.")
+    print("Saved to vectorstore/faiss_index.pkl")
 
 
 if __name__ == "__main__":
-    geojson_path = sys.argv[1] if len(sys.argv) > 1 else "data/hillsborough_tracts.geojson"
-    ingest_geojson(geojson_path)
+    path = sys.argv[1] if len(sys.argv) > 1 else "data/hillsborough_tracts.geojson"
+    ingest_geojson(path)

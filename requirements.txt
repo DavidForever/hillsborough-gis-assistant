@@ -3,9 +3,8 @@ anthropic>=0.28.0
 langchain>=0.2.0
 langchain-community>=0.2.0
 langchain-anthropic>=0.1.15
-chromadb==0.5.23
-opentelemetry-api==1.24.0
-opentelemetry-sdk==1.24.0
+faiss-cpu>=1.7.4
+sentence-transformers>=2.7.0
 geopandas>=0.14.0
 folium>=0.17.0
 streamlit-folium>=0.20.0
